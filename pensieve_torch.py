@@ -10,6 +10,10 @@ from A3C import A3C
 from datetime import datetime
 import time
 
+MAX_LOAD = 150
+MAX_CAPACITY = 1000
+MAX_COST = 10,000
+
 
 S_INFO = 6  # bit_rate, buffer_size, next_chunk_size, bandwidth_measurement(throughput and time), chunk_til_video_end
 S_LEN = 8  # take how many frames in the past
@@ -35,12 +39,39 @@ TEST_LOG_FOLDER = './test_results/'
 TRAIN_TRACES = './data/cooked_traces/'
 
 #CRITIC_MODEL= './results/critic.pt'
-#ACTOR_MODEL = './results/actor.pt'
+ACTOR_MODEL = './results/actor.pt'
 CRITIC_MODEL = None
 
-TOTALEPOCH=30000
+TOTALEPOCH=3000
 IS_CENTRAL=True
 NO_CENTRAL=False
+
+def calculate_reward(self,which_cdn,cdn_load, cdn_capacity, cdn_cost):  ## not called
+        load_weight = 1
+        capacity_weight = 1
+        cost_weight = 1
+        if which_cdn == 'A':
+            load_weight *= 0.8  # Adjust weights based on CDN performance
+            capacity_weight *= 1.2
+            cost_weight *= 1.1
+        elif which_cdn == 'B':
+            load_weight *= 1.2
+            capacity_weight *= 0.9
+            cost_weight *= 1.3
+        elif which_cdn == 'C':
+            load_weight *= 1.1
+            capacity_weight *= 1.1
+            cost_weight *= 0.8
+
+        normalized_load = cdn_load / MAX_LOAD
+        normalized_capacity = cdn_capacity / MAX_CAPACITY
+        normalized_cost = cdn_cost / MAX_COST
+
+        reward = load_weight * (1 - normalized_load) + \
+             capacity_weight * normalized_capacity + \
+             cost_weight * (1 - normalized_cost)
+
+        return reward
 
 def testing(epoch, actor_model,log_file):
     # clean up the test results folder
@@ -49,6 +80,7 @@ def testing(epoch, actor_model,log_file):
     
     # run test script
     os.system('python rl_test.py '+actor_model)
+    
     
     # append test performance to the log
     rewards = []
@@ -131,7 +163,7 @@ def central_agent(net_params_queues, exp_queues, model_type):
         critic_gradient_batch = []
 
         for i in range(NUM_AGENTS):
-            s_batch, a_batch, r_batch, terminal, info = exp_queues[i].get()
+            s_batch, a_batch, r_batch, terminal, info = exp_queues[i].get()  #from experience replay buffer
 
 
             net.getNetworkGradient(s_batch,a_batch,r_batch,terminal=terminal)
@@ -157,15 +189,16 @@ def central_agent(net_params_queues, exp_queues, model_type):
             # Save the neural net parameters to disk.
             print("\nTrain ep:"+str(epoch+1)+",time use :"+str((datetime.now()-timenow).seconds)+"s\n")
             timenow=datetime.now()
-            torch.save(net.actorNetwork.state_dict(),SUMMARY_DIR+"/actor.pt")
+            torch.save(net.actorNetwork.state_dict(), SUMMARY_DIR + "/actor.pt")
             if model_type<2:
                 torch.save(net.criticNetwork.state_dict(),SUMMARY_DIR+"/critic.pt")
-            testing(epoch+1,SUMMARY_DIR+"/actor.pt",test_log_file)
+            # testing(epoch+1,SUMMARY_DIR+"/actor.pt",test_log_file)
 
 
 def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue, model_type):
     torch.set_num_threads(1)
 
+    # here, we are taking the input traces to the agent from the environment, these are the states
     net_env = env.Environment(all_cooked_time=all_cooked_time,
                               all_cooked_bw=all_cooked_bw,
                               random_seed=agent_id)
@@ -193,7 +226,7 @@ def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue,
             delay, sleep_time, buffer_size, rebuf, \
             video_chunk_size, next_video_chunk_sizes, \
             end_of_video, video_chunk_remain = \
-                net_env.get_video_chunk(bit_rate)
+                net_env.select_cdn(bit_rate)
 
             time_stamp += delay  # in ms
             time_stamp += sleep_time  # in ms
@@ -216,10 +249,17 @@ def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue,
                 # Note: we need to discretize the probability into 1/RAND_RANGE steps,
                 # because there is an intrinsic discrepancy in passing single state and batch states
 
-                delay, sleep_time, buffer_size, rebuf, \
-                video_chunk_size, next_video_chunk_sizes, \
-                end_of_video, video_chunk_remain = \
-                    net_env.get_video_chunk(bit_rate)
+                # get params from the environment by CDN selection (action)
+                # delay, sleep_time, buffer_size, rebuf, \
+                # video_chunk_size, next_video_chunk_sizes, \
+                # end_of_video, video_chunk_remain = \
+                #     net_env.select_cdn(bit_rate)
+
+
+                #my code - modified (wrt CDN)
+                delay, buffer_size, selected_cdn = net_env.select_cdn(bit_rate)  ###################################################
+   
+                # reward calc. for weight updation of the agent -- the reward is for selecting a CDN 
                 reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
                          - REBUF_PENALTY * rebuf \
                          - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[bit_rate] -
@@ -251,12 +291,12 @@ def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue,
             log_file.write('\n')  # so that in the log we know where video ends
 
 
-def main(arglist):
+def main(model_type=0):
 
     time=datetime.now()
     np.random.seed(RANDOM_SEED)
     torch.manual_seed(RANDOM_SEED)
-
+    # mp.set_start_method('spawn', force=True)
 
     assert len(VIDEO_BIT_RATE) == A_DIM
 
@@ -268,22 +308,22 @@ def main(arglist):
     net_params_queues = []
     exp_queues = []
     for i in range(NUM_AGENTS):
-        net_params_queues.append(mp.Queue(1))
-        exp_queues.append(mp.Queue(1))
+        net_params_queues.append(mp.Queue(3))
+        exp_queues.append(mp.Queue(3))
 
     # create a coordinator and multiple agent processes
     # (note: threading is not desirable due to python GIL)
     coordinator = mp.Process(target=central_agent,
-                             args=(net_params_queues, exp_queues,arglist.model_type))
+                             args=(net_params_queues, exp_queues,model_type)) # call for central agent
     coordinator.start()
 
-    all_cooked_time, all_cooked_bw, _ = load_trace.load_trace(TRAIN_TRACES)
+    all_cooked_time, all_cooked_bw, _ = load_trace.load_trace(TRAIN_TRACES) #from here the params will go to the agent
     agents = []
     for i in range(NUM_AGENTS):
         agents.append(mp.Process(target=agent,
                                  args=(i, all_cooked_time, all_cooked_bw,
                                        net_params_queues[i],
-                                       exp_queues[i],arglist.model_type)))
+                                       exp_queues[i],model_type)))
     for i in range(NUM_AGENTS):
         agents[i].start()
 
@@ -294,11 +334,5 @@ def main(arglist):
 
     print(str(datetime.now()-time))
 
-def parse_args():
-    parser=argparse.ArgumentParser("Pensieve")
-    parser.add_argument("--model_type",type=int,default=0,help="Refer to README for the meaning of this parameter")
-    return parser.parse_args()
-
 if __name__ == '__main__':
-    arglist=parse_args()
-    main(arglist)
+    main()

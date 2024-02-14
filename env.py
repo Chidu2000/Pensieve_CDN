@@ -17,6 +17,7 @@ NOISE_HIGH = 1.1
 VIDEO_SIZE_FILE = './data/video_size_'
 
 
+
 class Environment:
     def __init__(self, all_cooked_time, all_cooked_bw, random_seed=RANDOM_SEED):
         assert len(all_cooked_time) == len(all_cooked_bw)
@@ -33,7 +34,7 @@ class Environment:
         self.trace_idx = np.random.randint(len(self.all_cooked_time))
         self.cooked_time = self.all_cooked_time[self.trace_idx]
         self.cooked_bw = self.all_cooked_bw[self.trace_idx]
-
+        
         # randomize the start point of the trace
         # note: trace file starts with time 0
         self.mahimahi_ptr = np.random.randint(1, len(self.cooked_bw))
@@ -44,10 +45,9 @@ class Environment:
             self.video_size[bitrate] = []
             with open(VIDEO_SIZE_FILE + str(bitrate)) as f:
                 for line in f:
-                    self.video_size[bitrate].append(int(line.split()[0]))
+                    self.video_size[bitrate].append(int(line.split()[0]))           
 
-    def get_video_chunk(self, quality):
-
+    def select_cdn1(self, quality):
         assert quality >= 0
         assert quality < BITRATE_LEVELS
 
@@ -163,6 +163,43 @@ class Environment:
             next_video_chunk_sizes, \
             end_of_video, \
             video_chunk_remain
+    
+    def get_cdn_params(self,which_cdn): 
+        if which_cdn == 'A':
+            load = 100
+            capa = 100
+            cost = 100
+        elif which_cdn == 'B':
+            load = 50
+            capa = 50
+            cost = 50
+        else:
+            load = 20  
+            capa = 20   
+            cost = 20   
+        return load, capa, cost 
+
+    def select_cdn(self, quality):
+        assert quality >= 0
+        assert quality < BITRATE_LEVELS
+
+        # Simulate CDN selection based on quality parameter and CDN conditions
+        selected_cdn = 'A' if quality == '360p' else 'B' if quality == '480p' else 'C'  # Assuming 3 CDNs indexed from 0 to 2
+        video_chunk_size = self.video_size[quality][self.video_chunk_counter]
+
+
+        # Based on selected CDN, perform actions such as fetching data, calculating delay, etc.
+        # This is where you would interact with the chosen CDN and get the necessary information
+
+        cdn_load, cdn_capacity, cdn_cost = self.get_cdn_params(selected_cdn)
+    
+        # Update delay, buffer, etc. based on selected CDN
+        # You need to implement this based on your CDN interaction logic
+        delay = 0  # Placeholder value
+        buffer_size = 0  # Placeholder value
+    
+        return delay, buffer_size, selected_cdn
+
 
     def setEnvironmentPtr(self,ptrTraceIndex,ptrIndex):
         self.trace_idx=ptrTraceIndex

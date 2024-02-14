@@ -49,22 +49,22 @@ class A3C(object):
 
         R_batch[-1] = r_batch[-1]
         for t in reversed(range(r_batch.shape[0]-1)):
-            R_batch[t]=r_batch[t] + self.discount*R_batch[t+1]
+            R_batch[t]=r_batch[t] + self.discount*R_batch[t+1]  #accumulated reward (from r_batch of each local agent)
 
         if self.model_type<2:
             with torch.no_grad():
                 v_batch=self.criticNetwork.forward(s_batch).squeeze().to(self.device)
-            td_batch=R_batch-v_batch
+            td_batch=R_batch-v_batch # advantage
         else:
             td_batch=R_batch
 
         probability=self.actorNetwork.forward(s_batch)
         m_probs=Categorical(probability)
         log_probs=m_probs.log_prob(a_batch)
-        actor_loss=torch.sum(log_probs*(-td_batch))
+        actor_loss=torch.sum(log_probs*(-td_batch)) # based on the advantage calc.
         entropy_loss=-self.entropy_weight*torch.sum(m_probs.entropy())
         actor_loss=actor_loss+entropy_loss
-        actor_loss.backward()
+        actor_loss.backward()  # backpropagation with gradients
 
 
         if self.model_type<2:
@@ -87,6 +87,8 @@ class A3C(object):
     def actionSelect(self,stateInputs):
         if not self.is_central:
             with torch.no_grad():
+                stateInputs = stateInputs.to(self.device)
+                self.actorNetwork.to(self.device)
                 probability=self.actorNetwork.forward(stateInputs)
                 m=Categorical(probability)
                 action=m.sample().item()
@@ -99,7 +101,7 @@ class A3C(object):
         for target_param,source_param in zip(self.actorNetwork.parameters(),actor_net_params):
             target_param.data.copy_(source_param.data)
  
-    def updateNetwork(self):
+    def updateNetwork(self):  # finally weights are updated after the .backward() of the actor
         # use the feature of accumulating gradient in pytorch
         if self.is_central:
             self.actorOptim.step()
