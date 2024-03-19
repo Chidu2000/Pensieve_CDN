@@ -7,7 +7,6 @@ import fixed_env as env
 from Network import ActorNetwork
 from torch.distributions import Categorical
 
-
 S_INFO = 6  # bit_rate, buffer_size, next_chunk_size, bandwidth_measurement(throughput and time), chunk_til_video_end
 S_LEN = 8  # take how many frames in the past
 A_DIM = 6
@@ -74,7 +73,7 @@ def main():
         reward = VIDEO_BIT_RATE[bit_rate] / M_IN_K \
                  - REBUF_PENALTY * rebuf \
                  - SMOOTH_PENALTY * np.abs(VIDEO_BIT_RATE[bit_rate] -
-                                           VIDEO_BIT_RATE[last_bit_rate]) / M_IN_K
+                                           VIDEO_BIT_RATE[last_bit_rate]) / M_IN_K 
 
         last_bit_rate = bit_rate
 
@@ -85,7 +84,8 @@ def main():
                        str(rebuf) + '\t' +
                        str(video_chunk_size) + '\t' +
                        str(delay) + '\t' +
-                       str(reward) + '\n')
+                       str(reward) + '\n' 
+                       )
         log_file.flush()
 
         # retrieve previous state

@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-
 class ActorNetwork(nn.Module):
     # actornetwork pass the test
     def __init__(self,state_dim,action_dim,n_conv=128,n_fc=128,n_fc1=128):
@@ -32,10 +30,10 @@ class ActorNetwork(nn.Module):
         self.fullyConnected=nn.Linear(self.numFcInput,self.numFcOutput)
 
         self.outputLayer=nn.Linear(self.numFcOutput,self.a_dim)
+        self.dropout = nn.Dropout(p=0.2)
+
+
         #------------------init layer weight--------------------
-        # tensorflow-1.12 uses glorot_uniform(also called xavier_uniform) to initialize weight
-        # uses zero to initialize bias
-        # Conv1d also use same initialize method 
         nn.init.xavier_uniform_(self.bufferFc.weight.data)
         nn.init.constant_(self.bufferFc.bias.data,0.0)
         nn.init.xavier_uniform_(self.leftChunkFc.weight.data)
@@ -50,13 +48,8 @@ class ActorNetwork(nn.Module):
         nn.init.constant_(self.dConv1d.bias.data,0.0)
         nn.init.xavier_normal_(self.cConv1d.weight.data)
         nn.init.constant_(self.cConv1d.bias.data,0.0)
-
-
-
-
-
+        
     def forward(self,inputs):
-
         bitrateFcOut=F.relu(self.bitrateFc(inputs[:,0:1,-1]),inplace=True)
 
         bufferFcOut=F.relu(self.bufferFc(inputs[:,1:2,-1]),inplace=True)
@@ -83,7 +76,6 @@ class ActorNetwork(nn.Module):
 
         return out
 
-
 class CriticNetwork(nn.Module):
     # return a value V(s,a)
     # the dim of state is not considered
@@ -93,7 +85,7 @@ class CriticNetwork(nn.Module):
         self.a_dim=a_dim
         self.vectorOutDim=n_conv
         self.scalarOutDim=n_fc
-        self.numFcInput=2 * self.vectorOutDim * (self.s_dim[1]-4+1) + 3 * self.scalarOutDim + self.vectorOutDim*(self.a_dim-4+1)
+        self.numFcInput= 2 * self.vectorOutDim * (self.s_dim[1]-4+1) + 3 * self.scalarOutDim + self.vectorOutDim*(self.a_dim-4+1)
         self.numFcOutput=n_fc1
 
         #----------define layer----------------------
@@ -112,11 +104,9 @@ class CriticNetwork(nn.Module):
         self.fullyConnected=nn.Linear(self.numFcInput,self.numFcOutput)
 
         self.outputLayer=nn.Linear(self.numFcOutput,1)
+        self.dropout = nn.Dropout(p=0.2)  # avoiding overfit
 
         #------------------init layer weight--------------------
-        # tensorflow-1.12 uses glorot_uniform(also called xavier_uniform) to initialize weight
-        # uses zero to initialize bias
-        # Conv1d also use same initialize method 
         nn.init.xavier_uniform_(self.bufferFc.weight.data)
         nn.init.constant_(self.bufferFc.bias.data,0.0)
         nn.init.xavier_uniform_(self.leftChunkFc.weight.data)
@@ -134,7 +124,6 @@ class CriticNetwork(nn.Module):
 
 
     def forward(self,inputs):
-
         bitrateFcOut=F.relu(self.bitrateFc(inputs[:,0:1,-1]),inplace=True)
 
         bufferFcOut=F.relu(self.bufferFc(inputs[:,1:2,-1]),inplace=True)
@@ -160,6 +149,34 @@ class CriticNetwork(nn.Module):
         out=self.outputLayer(fcOutput)
 
         return out
+    
+class CDN_Select_NN(nn.Module):    
+    def __init__(self):
+        super(CDN_Select_NN, self).__init__()
+        self.fc1 = nn.Linear(6, 64)  # Input size is 6 (3 for states and 3 for rewards)
+        self.fc2 = nn.Linear(64, 16)
+        self.output = nn.Linear(16, 3)  # Output size is 3 for action probabilities
+
+        # Initialize weights
+        nn.init.xavier_uniform_(self.fc1.weight.data)
+        nn.init.constant_(self.fc1.bias.data, 0.0)
+        nn.init.xavier_uniform_(self.fc2.weight.data)
+        nn.init.constant_(self.fc2.bias.data, 0.0)
+        nn.init.xavier_uniform_(self.output.weight.data)
+        nn.init.constant_(self.output.bias.data, 0.0)
+
+    def forward(self, x):
+        states = x[:, 0, 0, :]  
+        rewards = x[:, 0, 1, :] 
+        
+        combined_input = torch.cat([states, rewards], dim=1)
+
+        fc_output = F.relu(self.fc1(combined_input))
+        fc_output = F.relu(self.fc2(fc_output))
+
+        action_probs = F.softmax(self.output(fc_output), dim=1)
+        return action_probs
+        
 
 if __name__ =='__main__':
     S_INFO=6
@@ -179,7 +196,7 @@ if __name__ =='__main__':
 
     c_optim=torch.optim.Adam(c_net.parameters(),lr=0.005)
 
-    loss_func=nn.MSELoss()
+    loss_func=nn.MSELoss()  
 
     esp=100
     for i in range(esp):
@@ -187,9 +204,8 @@ if __name__ =='__main__':
         next_npState=torch.randn(AGENT_NUM,S_INFO,S_LEN)
         #reward=torch.randn(1)
         reward=torch.randn(AGENT_NUM)
-
-        action=a_net.forward(npState)
-        t_action=a_net.forward(next_npState)
+        action=a_net.forward(npState)  # npState -> [3,3,8] i.e S_INFO, ACTION_DIM, S_LEN
+        t_action=a_net.forward(next_npState) 
 
         q=c_net.forward(npState)
         t_q_out=t_c_net.forward(next_npState)

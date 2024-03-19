@@ -1,43 +1,61 @@
-import os 
 import numpy as np
 import matplotlib.pyplot as plt
 
-def matLog():
-    col=['darkorchid','firebrick','limegreen']
-    real_path=os.path.realpath(__file__)[:-7]
-    model_file = ['model_0','model_1','model_2']
-    log_file_list=sorted([log_name for log_name in os.listdir(real_path+'/'+model_file[0]) if log_name[:8]=='log_test'])
+def plot_metrics(log_files):
+    col = ['darkorchid', 'firebrick', 'limegreen']
 
-    num_log = len(log_file_list)
+    episodes = []
+    rewards = []
+    losses = []
+    cdn_hits = []
 
-    episodes=[[[] for i in range(num_log)] for _ in model_file]
-    rewards=[[[] for i in range(num_log)] for _ in model_file]
+    for idx, log_file in enumerate(log_files):
+        with open(log_file, 'r') as f:
+            ep = []
+            rew = []
+            los = []
+            cdn = []
+            for line in f:
+                par = line.split()
+                ep.append(int(par[0]))
+                rew.append(float(par[-1]))
+                los.append(float(par[-3].replace('tensor(', '').replace(')', '')))
+                cdn.append(par[-2])
 
-    for model_idx,model_path in enumerate(model_file):
-        for log_idx,log_name in enumerate(log_file_list):
-            with open(real_path+'/'+model_path+'/'+log_name,'rb') as f:
-                for line in f:
-                    par=line.split()
-                    episodes[model_idx][log_idx].append(int(par[0]))
-                    rewards[model_idx][log_idx].append(float(par[3]))
+            episodes.append(ep)
+            rewards.append(rew)
+            losses.append(los)
+            cdn_hits.append(cdn)
 
+            plt.figure(figsize=(15, 5))
 
-    rewards=np.array(rewards)
-    mean_rewards=np.mean(rewards,axis=1)
-    std_rewards=np.std(rewards,axis=1)
-    error_bar_l=mean_rewards-std_rewards
-    error_bar_h=mean_rewards+std_rewards
-    print(mean_rewards)
-    for b in range(len(model_file)):
-        print(episodes[0][0])
-        p,=plt.plot(episodes[0][0],mean_rewards[b],label=model_file[b],color=col[b])
-        plt.fill_between(episodes[0][0],error_bar_l[b],error_bar_h[b],color=col[b],alpha=0.3)
+            plt.subplot(1, 3, 1)
+            plt.plot(ep, rew, label=f'Model {idx}', color=col[idx])
+            plt.xlabel('Number of Training Episodes', fontsize=12)
+            plt.ylabel('Rewards', fontsize=12)
+            plt.title('Rewards vs. Training Episodes', fontsize=14)
+            plt.legend()
+            plt.grid(True)
 
-    plt.xlabel('number of trainning episodes')
-    plt.ylabel('average Qoe')
-    plt.legend(loc='best')
-    plt.savefig('mean_rewards.png')
-    plt.close()
+            plt.subplot(1, 3, 2)
+            plt.plot(ep, los, label=f'Model {idx}', color=col[idx])
+            plt.xlabel('Number of Training Episodes', fontsize=12)
+            plt.ylabel('Loss', fontsize=12)
+            plt.title('Loss vs. Training Episodes', fontsize=14)
+            plt.legend()
+            plt.grid(True)
 
-if __name__=='__main__':
-    matLog()
+            plt.subplot(1, 3, 3)
+            plt.plot(ep, cdn, label=f'Model {idx}', color=col[idx])
+            plt.xlabel('Number of Training Episodes', fontsize=12)
+            plt.ylabel('CDN Hit Frequency', fontsize=12)
+            plt.title('CDN Hit Frequency vs. Training Episodes', fontsize=14)
+            plt.legend()
+            plt.grid(True)
+
+            plt.tight_layout()
+            plt.show()
+
+if __name__ == '__main__':
+    log_files = ['img/log_test']
+    plot_metrics(log_files)

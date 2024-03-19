@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 MILLISECONDS_IN_SECOND = 1000.0
 B_IN_MB = 1000000.0
@@ -26,6 +27,8 @@ class Environment:
 
         self.video_chunk_counter = 0
         self.buffer_size = 0
+
+        self.count = 0
 
         # pick a random trace file
         self.trace_idx = 0
@@ -152,7 +155,7 @@ class Environment:
         next_video_chunk_sizes = []
         for i in range(BITRATE_LEVELS):
             next_video_chunk_sizes.append(self.video_size[i][self.video_chunk_counter])
-
+        
         return delay, \
             sleep_time, \
             return_buffer_size / MILLISECONDS_IN_SECOND, \
@@ -161,3 +164,16 @@ class Environment:
             next_video_chunk_sizes, \
             end_of_video, \
             video_chunk_remain
+    
+    def get_cdn_selected(self,input_features,cdn_select_obj,file_type_cdn): 
+        input_features = input_features.unsqueeze(0).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            predicted_cdn_probs = cdn_select_obj(input_features)  ## passing features to the actor neural net for decision
+            predicted_cdn_label = torch.argmax(predicted_cdn_probs).item()
+            print('pred cdn label', predicted_cdn_label)
+        cdn_labels = ['Akamai', 'AWS', 'Google']  
+        predicted_cdn = cdn_labels[predicted_cdn_label]
+        # print(f'For {file_type_cdn}, the CDN selected is {predicted_cdn}')
+        print('CDN selected:', predicted_cdn)
+        return predicted_cdn
