@@ -165,7 +165,7 @@ class Environment:
             end_of_video, \
             video_chunk_remain
     
-    def get_cdn_selected(self,input_features,cdn_select_obj,file_type_cdn): 
+    def get_cdn_selected(self,input_features,cdn_select_obj): 
         input_features = input_features.unsqueeze(0).unsqueeze(0).to(self.device)
         
         with torch.no_grad():

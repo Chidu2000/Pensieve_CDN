@@ -1,4 +1,3 @@
-import os
 import sys
 import torch
 import load_trace
@@ -106,7 +105,6 @@ def main():
         # Note: we need to discretize the probability into 1/RAND_RANGE steps,
         # because there is an intrinsic discrepancy in passing single state and batch states
 
-
         if end_of_video:
             log_file.write('\n')
             log_file.close()
@@ -117,7 +115,6 @@ def main():
             state=torch.zeros((S_INFO,S_LEN))
 
             video_count += 1
-
             if video_count >= len(all_file_names):
                 break
 

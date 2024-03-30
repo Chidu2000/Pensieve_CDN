@@ -165,12 +165,13 @@ class Environment:
     
     def get_cdn_selected(self,input_features,cdn_select_obj): 
         input_features = input_features.unsqueeze(0).unsqueeze(0).to(self.device)
-        
+
         with torch.no_grad():
             predicted_cdn_probs = cdn_select_obj(input_features)  ## passing features to the cdn select neural net for decision
             print('predicted cdn probs', predicted_cdn_probs)
+
+            adjusted_probs = predicted_cdn_probs.clone()
             predicted_cdn_label = torch.argmax(predicted_cdn_probs).item()
-            print('cdn label', predicted_cdn_label)
     
         cdn_labels = ['Akamai', 'AWS', 'Google']  
         predicted_cdn = cdn_labels[predicted_cdn_label]

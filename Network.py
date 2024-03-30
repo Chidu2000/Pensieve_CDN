@@ -30,8 +30,6 @@ class ActorNetwork(nn.Module):
         self.fullyConnected=nn.Linear(self.numFcInput,self.numFcOutput)
 
         self.outputLayer=nn.Linear(self.numFcOutput,self.a_dim)
-        self.dropout = nn.Dropout(p=0.2)
-
 
         #------------------init layer weight--------------------
         nn.init.xavier_uniform_(self.bufferFc.weight.data)
@@ -104,7 +102,6 @@ class CriticNetwork(nn.Module):
         self.fullyConnected=nn.Linear(self.numFcInput,self.numFcOutput)
 
         self.outputLayer=nn.Linear(self.numFcOutput,1)
-        self.dropout = nn.Dropout(p=0.2)  # avoiding overfit
 
         #------------------init layer weight--------------------
         nn.init.xavier_uniform_(self.bufferFc.weight.data)
@@ -154,14 +151,18 @@ class CDN_Select_NN(nn.Module):
     def __init__(self):
         super(CDN_Select_NN, self).__init__()
         self.fc1 = nn.Linear(6, 64)  # Input size is 6 (3 for states and 3 for rewards)
-        self.fc2 = nn.Linear(64, 16)
-        self.output = nn.Linear(16, 3)  # Output size is 3 for action probabilities
+        self.fc2 = nn.Linear(64, 128)
+        self.fc3 = nn.Linear(128, 32)
+        self.dropout = nn.Dropout(p=0.2)
+        self.output = nn.Linear(32, 3)  # Output size is 3 for action probabilities
 
         # Initialize weights
         nn.init.xavier_uniform_(self.fc1.weight.data)
         nn.init.constant_(self.fc1.bias.data, 0.0)
         nn.init.xavier_uniform_(self.fc2.weight.data)
         nn.init.constant_(self.fc2.bias.data, 0.0)
+        nn.init.xavier_uniform_(self.fc3.weight.data)
+        nn.init.constant_(self.fc3.bias.data, 0.0)
         nn.init.xavier_uniform_(self.output.weight.data)
         nn.init.constant_(self.output.bias.data, 0.0)
 
@@ -169,12 +170,16 @@ class CDN_Select_NN(nn.Module):
         states = x[:, 0, 0, :]  
         rewards = x[:, 0, 1, :] 
         
-        combined_input = torch.cat([states, rewards], dim=1)
+        cat_input = torch.cat([states, rewards], dim=1)
 
-        fc_output = F.relu(self.fc1(combined_input))
-        fc_output = F.relu(self.fc2(fc_output))
-
-        action_probs = F.softmax(self.output(fc_output), dim=1)
+        fc_output_1 = F.elu(self.fc1(cat_input))
+        fc_output_1 = self.dropout(fc_output_1)
+        fc_output = F.elu(self.fc2(fc_output_1))
+        fc_output = self.dropout(fc_output)
+        fc_output = F.elu(self.fc3(fc_output))
+        f_fc_output = self.dropout(fc_output)
+        
+        action_probs = F.softmax(self.output(f_fc_output), dim=1)
         return action_probs
         
 

@@ -8,9 +8,6 @@ PATH='./results/'
 
 RAND_RANGE=1000
 
-
-################ Integrating Proximal policy optimization with the A3C DRL ############################################
-
 class A3C(object):
     def __init__(self,is_central,model_type,s_dim,action_dim,actor_lr=1e-4,critic_lr=1e-3):
         self.s_dim=s_dim
@@ -125,7 +122,7 @@ class A3C(object):
     
     def getCriticParam(self):
         return list(self.criticNetwork.parameters())
-
+    
 
 
 if __name__ =='__main__':

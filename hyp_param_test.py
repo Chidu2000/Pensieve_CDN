@@ -9,25 +9,8 @@ import torch
 from A3C import A3C
 from datetime import datetime
 import matplotlib.pyplot as plt
+import optuna
 
-
-S_INFO = 6  # bit_rate, buffer_size, next_chunk_size, bandwidth_measurement(throughput and time), chunk_til_video_end
-S_LEN = 8  # take how many frames in the past
-A_DIM = 6
-ACTOR_LR_RATE = 0.0001
-CRITIC_LR_RATE = 0.001
-NUM_AGENTS = 3
-TRAIN_SEQ_LEN = 100  # take as a train batch
-MODEL_SAVE_INTERVAL = 100
-VIDEO_BIT_RATE = [300,750,1200,1850,2850,4300]  # Kbps
-HD_REWARD = [1, 2, 3, 12, 15, 20]
-BUFFER_NORM_FACTOR = 10.0
-CHUNK_TIL_VIDEO_END_CAP = 48.0
-M_IN_K = 1000.0
-REBUF_PENALTY = 4.3  # 1 sec rebuffering -> 3 Mbps
-SMOOTH_PENALTY = 1
-DEFAULT_QUALITY = 1  # default video quality without agent
-RANDOM_SEED = 42
 SUMMARY_DIR = './results'
 LOG_FILE = './results/log'
 TEST_LOG_FOLDER = './test_results/'
@@ -37,11 +20,8 @@ TRAIN_TRACES = './data/cooked_traces/'
 ACTOR_MODEL = './results/actor.pt'
 CRITIC_MODEL = None
 
-TOTALEPOCH=100
-IS_CENTRAL=True
-NO_CENTRAL=False
 
-def testing(epoch, actor_model,log_file,cdn_selection, loss):
+def testing(epoch, actor_model,log_file,cdn_selection, total_td_loss):
     # clean up the test results folder
     os.system('rm -r ' + TEST_LOG_FOLDER)
     os.system('mkdir ' + TEST_LOG_FOLDER)
@@ -81,13 +61,15 @@ def testing(epoch, actor_model,log_file,cdn_selection, loss):
                     str(rewards_mean) + '\t' +
                     str(rewards_median) + '\t' +
                     str(rewards_95per) + '\t' +
-                    str(loss) + '\t' +
+                    str(total_td_loss) + '\t' +
                     str(cdn_selection) + '\t' +
                     str(rewards_max) + '\n')
         log_file.flush()
 
 
-def central_agent(net_params_queues, exp_queues, model_type):
+def central_agent(net_params_queues, exp_queues, model_type,best_hyperparams):
+    (ACTOR_LR_RATE, CRITIC_LR_RATE, S_INFO, S_LEN, A_DIM, NUM_AGENTS, TRAIN_SEQ_LEN, MODEL_SAVE_INTERVAL, VIDEO_BIT_RATE, HD_REWARD, BUFFER_NORM_FACTOR, CHUNK_TIL_VIDEO_END_CAP, M_IN_K, \
+            REBUF_PENALTY, SMOOTH_PENALTY, DEFAULT_QUALITY, RANDOM_SEED, RAND_RANGE, TOTALEPOCH, IS_CENTRAL, NO_CENTRAL) = best_hyperparams
     torch.set_num_threads(1)
 
     timenow=datetime.now()
@@ -106,7 +88,7 @@ def central_agent(net_params_queues, exp_queues, model_type):
         net.actorNetwork.load_state_dict(torch.load(ACTOR_MODEL))
         net.criticNetwork.load_state_dict(torch.load(CRITIC_MODEL))
 
-    cdn_selections = {'AWS':0, 'Akamai':0, 'Google':0}    
+    cdn_selections = {"Akamai":0, "AWS":0, "Google":0}   
 
     for epoch in range(TOTALEPOCH):
         # synchronize the network parameters of work agent
@@ -120,7 +102,7 @@ def central_agent(net_params_queues, exp_queues, model_type):
         # in the experiences from the agents
         total_batch_len = 0.0
         total_reward = 0.0
-        loss = 0.0
+        total_td_loss = 0.0
         total_entropy = 0.0
         total_agents = 0.0 
 
@@ -131,10 +113,11 @@ def central_agent(net_params_queues, exp_queues, model_type):
         for i in range(NUM_AGENTS):
             s_batch, a_batch, r_batch, terminal, info, net_env = exp_queues[i].get() # for all the 3 agents , so a vector of size 3 (i.e s,a,r_batch)
 
-            loss = net.getNetworkGradient(s_batch,a_batch,r_batch, terminal=terminal) #-------> this is what is (S+1 | S,A,R)
+            loss = net.getNetworkGradient(s_batch,a_batch,r_batch,terminal=terminal) #-------> this is what is (S+1 | S,A,R)
+            total_td_loss += loss
             s_batches.append(torch.tensor(np.sum(s_batch)))
             r_batches.append(torch.tensor(np.sum(r_batch)))
-            loss = torch.tensor(loss)
+            total_td_loss = torch.tensor(total_td_loss)
 
             total_reward += np.sum(r_batch)
             total_batch_len += len(r_batch)
@@ -168,7 +151,7 @@ def central_agent(net_params_queues, exp_queues, model_type):
             torch.save(net.actorNetwork.state_dict(),SUMMARY_DIR+"/actor.pt")
             if model_type<2:
                 torch.save(net.criticNetwork.state_dict(),SUMMARY_DIR+"/critic.pt")
-            testing(epoch+1,SUMMARY_DIR+"/actor.pt",test_log_file,cdn_selection,loss)  # test loss
+            testing(epoch+1,SUMMARY_DIR+"/actor.pt",test_log_file,cdn_selection,total_td_loss)  # test loss
 
     # Plot CDN selections
     cdn_names = list(cdn_selections.keys())
@@ -181,7 +164,9 @@ def central_agent(net_params_queues, exp_queues, model_type):
     plt.show()
 
 
-def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue, model_type):
+def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue, model_type,best_hyperparams):
+    (ACTOR_LR_RATE, CRITIC_LR_RATE, S_INFO, S_LEN, A_DIM, NUM_AGENTS, TRAIN_SEQ_LEN, MODEL_SAVE_INTERVAL, VIDEO_BIT_RATE, HD_REWARD, BUFFER_NORM_FACTOR, CHUNK_TIL_VIDEO_END_CAP, M_IN_K, \
+            REBUF_PENALTY, SMOOTH_PENALTY, DEFAULT_QUALITY, RANDOM_SEED, RAND_RANGE, TOTALEPOCH, IS_CENTRAL, NO_CENTRAL) = best_hyperparams
     torch.set_num_threads(1)
 
     net_env = env.Environment(all_cooked_time=all_cooked_time,
@@ -267,14 +252,36 @@ def agent(agent_id, all_cooked_time, all_cooked_bw, net_params_queue, exp_queue,
             
             log_file.write('\n')  # so that in the log we know where video ends
 
+def objective(trial):
+    ACTOR_LR_RATE = trial.suggest_float("ACTOR_LR_RATE", 1e-4, 1e-2)
+    CRITIC_LR_RATE = trial.suggest_float("CRITIC_LR_RATE", 1e-3, 1e-1)
+    S_INFO = trial.suggest_int("S_INFO", 6, 8) # bit_rate, buffer_size, next_chunk_size, bandwidth_measurement(throughput and time), chunk_til_video_end
+    S_LEN = trial.suggest_int("S_LEN", 8, 9)   # take how many frames in the past
+    A_DIM = 6
+    NUM_AGENTS = 3
+    TRAIN_SEQ_LEN = trial.suggest_int("TRAIN_SEQ_LEN", 50, 100)
+    MODEL_SAVE_INTERVAL = trial.suggest_int("MODEL_SAVE_INTERVAL", 50, 100)
+    VIDEO_BIT_RATE = [300, 750, 1200, 1850, 2850, 4300]
+    HD_REWARD = [1, 2, 3, 12, 15, 20]
+    BUFFER_NORM_FACTOR = trial.suggest_int("BUFFER_NORM_FACTOR", 10.0, 12.0)
+    CHUNK_TIL_VIDEO_END_CAP = trial.suggest_int("CHUNK_TIL_VIDEO_END_CAP", 48.0, 50.0)
+    M_IN_K = trial.suggest_int("M_IN_K", 1000.0, 1100.0)
+    REBUF_PENALTY = trial.suggest_int("REBUF_PENALTY", 4.3, 5)
+    SMOOTH_PENALTY = trial.suggest_int("SMOOTH_PENALTY", 1, 2)
+    DEFAULT_QUALITY = 1  # default video quality without agent
+    RANDOM_SEED = 42
+    RAND_RANGE = trial.suggest_int("RAND_RANGE", 1000, 1200)
 
-def main(arglist):
+    TOTALEPOCH=100
+    IS_CENTRAL=True
+    NO_CENTRAL=False
+
     time=datetime.now()
     np.random.seed(RANDOM_SEED)
     torch.manual_seed(RANDOM_SEED)
 
 
-    assert len(VIDEO_BIT_RATE) == A_DIM
+    # assert len(VIDEO_BIT_RATE) == A_DIM
 
     # create result directory
     if not os.path.exists(SUMMARY_DIR):
@@ -292,8 +299,11 @@ def main(arglist):
         
     all_cooked_time, all_cooked_bw, _,= load_trace.load_trace(TRAIN_TRACES)
 
+    best_hyperparams = (ACTOR_LR_RATE, CRITIC_LR_RATE, S_INFO, S_LEN, A_DIM, NUM_AGENTS, TRAIN_SEQ_LEN, MODEL_SAVE_INTERVAL, VIDEO_BIT_RATE, HD_REWARD, BUFFER_NORM_FACTOR, CHUNK_TIL_VIDEO_END_CAP, M_IN_K,\
+                            REBUF_PENALTY, SMOOTH_PENALTY, DEFAULT_QUALITY, RANDOM_SEED, RAND_RANGE, TOTALEPOCH, IS_CENTRAL, NO_CENTRAL)
+
     coordinator = mp.Process(target=central_agent,
-                             args=(net_params_queues, exp_queues,arglist.model_type))
+                             args=(net_params_queues, exp_queues,arglist.model_type,best_hyperparams))
     coordinator.start()
 
     
@@ -302,7 +312,7 @@ def main(arglist):
         agents.append(mp.Process(target=agent,
                                  args=(i, all_cooked_time, all_cooked_bw,
                                        net_params_queues[i],
-                                       exp_queues[i],arglist.model_type)))
+                                       exp_queues[i],arglist.model_type,best_hyperparams)))
     for i in range(NUM_AGENTS):
         agents[i].start()
 
@@ -313,6 +323,11 @@ def main(arglist):
 
     print(str(datetime.now()-time))
 
+def main(arglist):
+
+    study = optuna.create_study(direction="maximize")  # Create a new study.
+    study.optimize(objective, n_trials=100)
+    
 def parse_args():
     parser=argparse.ArgumentParser("Pensieve")
     parser.add_argument("--model_type",type=int,default=0,help="Refer to README for the meaning of this parameter")
